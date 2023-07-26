@@ -2,7 +2,7 @@
  * Shared part of Simon boomerang test. Contains optimized Simon functions for all sizes, any starting round and any number of rounds.
  *
  * Authors:
- * Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria
+ * Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
  *
  * Simon functions are optimized from the NSA reference implementation: https://nsacyber.github.io/simon-speck/implementations/ImplementationGuide1.1.pdf
  *

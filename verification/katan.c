@@ -1,21 +1,21 @@
 /*
- Boomerang search on Katan.
-
- Authors:
- Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria
-
- Built upon the reference bitslice implementation of KATAN.
-
- Original Authors:
- Jean-Philippe Aumasson, FHNW, Windisch, Switzerland
- Miroslav Knezevic, Katholieke Universiteit Leuven, Belgium
- Orr Dunkelman, Weizmann Institute of Science, Israel
-
- Thanks goes to Bo Zhu for pointing out a bug in the KTANTAN part
-
- Thanks ges to Wei Lei for pointing out a bug in the KTANTAN part
+ * Boomerang search on Katan.
+ *
+ * Authors:
+ * Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
+ *
+ * The KATAN functions have been optimized from the reference bitslice implementation.
+ *
+ * Original Authors:
+ * Jean-Philippe Aumasson, FHNW, Windisch, Switzerland
+ * Miroslav Knezevic, Katholieke Universiteit Leuven, Belgium
+ * Orr Dunkelman, Weizmann Institute of Science, Israel
+ *
+ * Thanks goes to Bo Zhu for pointing out a bug in the KTANTAN part
+ *
+ * Thanks ges to Wei Lei for pointing out a bug in the KTANTAN part
+ *
 */
-
 
 #include <stdio.h>
 #include <stdlib.h>

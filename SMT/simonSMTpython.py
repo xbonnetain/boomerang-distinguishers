@@ -2,8 +2,13 @@
 # SMT model generator for Simon32 boomerangs
 #
 # Authors:
-# Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria
+# Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
 #
+# Built upon the SMT model for Simon32 rotational-xor differentials from
+# Improved Rotational-XOR Cryptanalysis of Simon-like Block Ciphers
+# by Jinyu Lu, Yunwen Liu, Tomer Ashur, Bing Sun and Chao Li.
+#
+
 
 
 import sys

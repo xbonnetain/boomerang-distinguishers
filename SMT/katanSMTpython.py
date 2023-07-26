@@ -2,7 +2,7 @@
 # SMT Model generator for KATAN32 boomerangs
 #
 # Authors:
-# Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria
+# Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
 #
 
 import sys

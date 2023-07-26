@@ -2,7 +2,7 @@
  * Rotational-xor boomerang test on Simon
  *
  * Authors:
- * Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria
+ * Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
  *
  */
 

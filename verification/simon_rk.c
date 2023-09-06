@@ -27,7 +27,7 @@ void search_boomerang() {
 
     u64 nbmsg = 1ULL << 32;
 
-    //Uncomment to have random plaintexts instead of sequential
+//Uncomment to have random plaintexts instead of sequential
 //#define SAMPLE
 
     int keylen = 4;

@@ -59,8 +59,16 @@ def main():
 	print(f"\nGenerated {s} constraints for {nE0+nEm+nE1} rounds (cut {nE0}+{nEm}+{nE1}) objective {obj}",file=sys.stderr)
 
 
+# startingIndex: round at which starts the distinguisher
+# NbrE0: number of rounds in E0
+# NbrEm: number of middle round conditions to be checked
+# NbrE1: number of rounds in E1
+# obj: aimed distinguisher probability
+# check_instanciable: check that there exists one quartet of messages and keys that follow the characteristic
+# rk_d: for rxd
+# rotational: for rot and rxd
 def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False,rk_d=False, rotational=True):
-	# obj probability
+	# objective probability
 	OBJ = bin(obj)[2:].zfill(16)
 
 	# constant for key schedule: z0 for Simon 32
@@ -133,7 +141,7 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 
 	for i in range(NbrEm+NbrE1-1):
 		print("(declare-fun keyB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')	# key, diff
-		print("(declare-fun wrB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')			#  HW of z, ie proba of 1 round
+		print("(declare-fun wrB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')		#  HW of z, ie proba of 1 round
 
 	for i in range(NbrE1):
 		print("(declare-fun dB_"			,i+NbrE0+NbrEm," () (_ BitVec 16))", sep = '')	# = \gamma from https://ia.cr/2015/145
@@ -275,11 +283,11 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 	# -----------------------------------------------  MIDDLE PART --------------------------------------------
 
 	for i in range(NbrE0+1):
-		print("(assert (= #b0000000000000000 u_lftT_",i,"  ))", sep = '')			# ok
+		print("(assert (= #b0000000000000000 u_lftT_",i,"  ))", sep = '')			
 		print("(assert (= #b0000000000000000 u_rgtT_",i,"  ))", sep = '')
 
 	for i in range(NbrE0+NbrEm,NbrE0+NbrEm+NbrE1+1):
-		print("(assert (= #b0000000000000000 u_lftB_",i,"  ))", sep = '')			# ok
+		print("(assert (= #b0000000000000000 u_lftB_",i,"  ))", sep = '')			
 		print("(assert (= #b0000000000000000 u_rgtB_",i,"  ))", sep = '')
 
 
@@ -288,7 +296,6 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 	# BCT verification
 	for i in range(NbrE0,NbrE0+NbrEm):
 		if not rk_d or not rotational:
-			# one line version (no j)
 			print("(assert (= #xffff (bvor (bvand (bvor (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") ) (bvnot  ((_ rotate_left 8) lftT_",i,") )) (bvand (bvnot  ((_ rotate_left 1) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 1) rgtB_",i+1,") ) )) (bvor (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 1) lftT_",i,"))) (bvand (bvnot ((_ rotate_left 8) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 8) rgtB_",i+1,") ) )) ) (bvand (bvand (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") )   ((_ rotate_left 8) lftT_",i,")) (bvand (bvnot  ((_ rotate_left 1) u_rgtB_",i+1,") )  ((_ rotate_left 1) rgtB_",i+1,")) ) (bvand (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,") )  ((_ rotate_left 1) lftT_",i,")) (bvand (bvnot ((_ rotate_left 8) u_rgtB_",i+1,") )  ((_ rotate_left 8) rgtB_",i+1,")) ) ) ) ) )", sep = '')
 		else:
 			print("(assert (= #xffff (bvor (bvand (bvor (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") ) (bvnot  ((_ rotate_left 8) lftT_",i,") )) (bvand (bvnot  ((_ rotate_left 2) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 2) rgtB_",i+1,") ) )) (bvor (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 1) lftT_",i,"))) (bvand (bvnot ((_ rotate_left 9) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 9) rgtB_",i+1,") ) )) ) (bvand (bvand (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") )   ((_ rotate_left 8) lftT_",i,")) (bvand (bvnot  ((_ rotate_left 2) u_rgtB_",i+1,") )  ((_ rotate_left 2) rgtB_",i+1,")) ) (bvand (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,") )  ((_ rotate_left 1) lftT_",i,")) (bvand (bvnot ((_ rotate_left 9) u_rgtB_",i+1,") )  ((_ rotate_left 9) rgtB_",i+1,")) ) ) ) ) )", sep = '')
@@ -301,15 +308,15 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 		print("(assert (=  rgtT_",i+1,"  lftT_",i," ))", sep = '') 		# copied branch   difference
 		print("(assert (=  u_rgtT_",i+1,"  u_lftT_",i," ))", sep = '') 	# copied branch   unknown status
 
-		print("(assert (=  computableT_",i," (bvand (bvand (bvand (bvnot ((_ rotate_left 2) u_lftT_",i,")) (bvnot u_rgtT_",i,")) (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 8) u_lftT_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftT_",i,")) (bvnot ((_ rotate_left 8) lftT_",i,")) ) )))" , sep = '') # and key always known  changed
+		print("(assert (=  computableT_",i," (bvand (bvand (bvand (bvnot ((_ rotate_left 2) u_lftT_",i,")) (bvnot u_rgtT_",i,")) (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 8) u_lftT_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftT_",i,")) (bvnot ((_ rotate_left 8) lftT_",i,")) ) )))" , sep = '') # and key always known
 
 		print(f"(assert (= #xffff (bvor (bvnot PayT_{i}) (bvor {shift(f'lftT_{i}',1)} {shift(f'lftT_{i}',8)}  ))))") # Pay => active
 		print(f"(assert (= doublebitsT_{i} (bvand (bvand PayT_{i} {shift(f'PayT_{i}',7)}) (bvnot {shift(f'lftT_{i}',8)}))))") # Double if 2 pays and an inactive bit
 		print(f"(assert (= #x0000 (bvand (bvand PayT_{i} {shift(f'PayT_{i}',7)}) {shift(f'u_lftT_{i}',8)})))") # Two pays => known bit
 
-		print("(assert (=  u_lftT_",i+1,"  (bvand (bvnot computableT_",i,") (bvnot  PayT_",i," ))))", sep = '') # ok
+		print("(assert (=  u_lftT_",i+1,"  (bvand (bvnot computableT_",i,") (bvnot  PayT_",i," ))))", sep = '')
 
-		print("(assert (= computedValueT_",i," (bvxor (bvxor ((_ rotate_left 2) lftT_",i,") keyT_",i," ) rgtT_",i,")))", sep = '')	# if computable, this is what is the linear term changed
+		print("(assert (= computedValueT_",i," (bvxor (bvxor ((_ rotate_left 2) lftT_",i,") keyT_",i," ) rgtT_",i,")))", sep = '')	# if computable, this is what is the linear term
 
 		print(f"(assert (= (bvand computableT_{i} lftT_{i+1}) (bvand computableT_{i} computedValueT_{i} )) )") # Computable => result equals computed value
 		print(f"(assert (= #x0000 (bvand doublebitsT_{i} (bvxor (bvxor (bvxor rgtT_{i} {shift(f'lftT_{i}',2)}) (bvxor keyT_{i} lftT_{i+1}) ) (bvxor (bvxor {shift(f'rgtT_{i}',7)} {shift(f'lftT_{i}',9)}) (bvxor {shift(f'keyT_{i}',7)} {shift(f'lftT_{i+1}',7)} ))))))") # Double bits => equal outputs of the ands
@@ -322,10 +329,10 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 		print(f"(assert (= #x0000 (bvand lftB_{i} u_lftB_{i})))") # unknown => difference = 0
 
 
-		print("(assert (=  rgtB_",i+1,"  lftB_",i," ))", sep = '') 		# copied branch   difference           v
-		print("(assert (=  u_rgtB_",i+1,"  u_lftB_",i," ))", sep = '') 	# copied branch   unknown status       v
+		print("(assert (=  rgtB_",i+1,"  lftB_",i," ))", sep = '') 		# copied branch   difference           
+		print("(assert (=  u_rgtB_",i+1,"  u_lftB_",i," ))", sep = '') 	# copied branch   unknown status       
 
-		print("(assert (= computableB_",i," (bvand (bvand (bvand (bvnot u_lftB_",i+1,") (bvnot ((_ rotate_left 2) u_lftB_",i,") )) (bvand (bvnot ((_ rotate_left 1) u_lftB_",i,")) (bvnot ((_ rotate_left 8) u_lftB_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftB_",i,")) (bvnot ((_ rotate_left 8) lftB_",i,")) )))) " , sep = '') # changed
+		print("(assert (= computableB_",i," (bvand (bvand (bvand (bvnot u_lftB_",i+1,") (bvnot ((_ rotate_left 2) u_lftB_",i,") )) (bvand (bvnot ((_ rotate_left 1) u_lftB_",i,")) (bvnot ((_ rotate_left 8) u_lftB_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftB_",i,")) (bvnot ((_ rotate_left 8) lftB_",i,")) )))) " , sep = '') 
 
 		print(f"(assert (= #xffff (bvor (bvnot PayB_{i}) (bvor {shift(f'lftB_{i}',1)} {shift(f'lftB_{i}',8)}  ))))") # Pay => active
 		print(f"(assert (= doublebitsB_{i} (bvand (bvand PayB_{i} {shift(f'PayB_{i}',7)}) (bvnot {shift(f'lftB_{i}',8)}))))") # Double if 2 pays and an inactive bit
@@ -356,7 +363,7 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 
 
 
-	# sum all wrT_ to get final proba, has to be equal to bound_plain, which is a parameter
+	# sum all wrT_ to get final proba, has to be equal to the objective
 
 	print("(assert (=  #b",OBJ," ", sep = '',end='')
 	for i in range(NbrE0):

@@ -8,17 +8,18 @@
 import sys
 
 def header(f):
+	# -------------------------------- parameters for the solver  --------------------------------
 	print("(set-logic QF_ABV)",file=f)
 	print("(set-info :smt-lib-version 2.5)",file=f)
 	print("(set-option :produce-models true)\n",file=f)
 
 def i2v(i,l):
-	# Yup.
 	return "#b{:0{l}b}".format(i,l=l)
 
 def bit(v,b):
 	return f"((_ extract {b} {b}) {v})"
 
+# irregular update rule
 IR = [   1,1,1,1,1,1,1,0,0,0,
 	1,1,0,1,0,1,0,1,0,1,  1,1,1,0,1,1,0,0,1,1,  0,0,1,0,1,0,0,1,0,0,  0,1,0,0,0,1,1,0,0,0,  1,1,1,1,0,0,0,0,1,0,  0,0,0,1,0,1,0,0,0,0,
 	0,1,1,1,1,1,0,0,1,1,  1,1,1,1,0,1,0,1,0,0,  0,1,0,1,0,1,0,0,1,1,  0,0,0,0,1,1,0,0,1,1,  1,0,1,1,1,1,1,0,1,1,  1,0,1,0,0,1,0,1,0,1,
@@ -32,51 +33,55 @@ def force_bit(var,b,f):
 		else:
 			print(f"(assert (= {var} #b0))",file=f)
 
+
 def core(nE0,nEm,nE1,f, sk=False):
 
 	fwd_rds = nE0+nEm
 	bwd_rds = nEm+nE1
 	rds = nE0+nEm+nE1
 
-	# creating variables : x, y (L1, L2)
+	# creating variables : x, y (L1, L2) for the internal state bits
+	# T for the Top trail, B for the Bottom trail
 	for i in range(fwd_rds):
-		print(f"(declare-fun xT_{i} () (_ BitVec 13))",file=f)   # L1
-		print(f"(declare-fun yT_{i} () (_ BitVec 19))",file=f)   # L2
+		print(f"(declare-fun xT_{i} () (_ BitVec 13))",file=f)   
+		print(f"(declare-fun yT_{i} () (_ BitVec 19))",file=f)   
 
 	for i in range(nE0+1,rds+1):
-		print(f"(declare-fun xB_{i} () (_ BitVec 13))",file=f)   # L1
-		print(f"(declare-fun yB_{i} () (_ BitVec 19))",file=f)   # L2
+		print(f"(declare-fun xB_{i} () (_ BitVec 13))",file=f)   
+		print(f"(declare-fun yB_{i} () (_ BitVec 19))",file=f)   
 
+	# indicates if the difference in this bit is known or not
 	for i in range(nE0,fwd_rds):
-		print(f"(declare-fun uxT_{i} () (_ BitVec 13))",file=f)   # L1
-		print(f"(declare-fun uyT_{i} () (_ BitVec 19))",file=f)   # L2
+		print(f"(declare-fun uxT_{i} () (_ BitVec 13))",file=f)  
+		print(f"(declare-fun uyT_{i} () (_ BitVec 19))",file=f)  
 
 	for i in range(nE0+1,fwd_rds+1):
-		print(f"(declare-fun uxB_{i} () (_ BitVec 13))",file=f)   # L1
-		print(f"(declare-fun uyB_{i} () (_ BitVec 19))",file=f)   # L2
+		print(f"(declare-fun uxB_{i} () (_ BitVec 13))",file=f)  
+		print(f"(declare-fun uyB_{i} () (_ BitVec 19))",file=f)  
 
 
-	# creating variables : AL1, AL2
+	# creating variables : AL1, AL2 for AND activity
+	# nx0, ny0 for linear parts of the update functions
 	for i in range(fwd_rds-1):
-		print(f"(declare-fun AL1T_{i} () (_ BitVec 1)) ",file=f)   # L1
-		print(f"(declare-fun AL2T_{i} () (_ BitVec 1)) ",file=f)   # L2
-		print(f"(declare-fun nx0T_{i} () (_ BitVec 1)) ",file=f)   # L1
-		print(f"(declare-fun ny0T_{i} () (_ BitVec 1)) ",file=f)   # L2
+		print(f"(declare-fun AL1T_{i} () (_ BitVec 1)) ",file=f)   
+		print(f"(declare-fun AL2T_{i} () (_ BitVec 1)) ",file=f)   
+		print(f"(declare-fun nx0T_{i} () (_ BitVec 1)) ",file=f)   
+		print(f"(declare-fun ny0T_{i} () (_ BitVec 1)) ",file=f)   
 
 	for i in range(nE0+1,rds):
-		print(f"(declare-fun AL1B_{i} () (_ BitVec 1)) ",file=f)   # L1
-		print(f"(declare-fun AL2B_{i} () (_ BitVec 1)) ",file=f)   # L2
-		print(f"(declare-fun nx0B_{i} () (_ BitVec 1)) ",file=f)   # L1
-		print(f"(declare-fun ny0B_{i} () (_ BitVec 1)) ",file=f)   # L2
+		print(f"(declare-fun AL1B_{i} () (_ BitVec 1)) ",file=f)   
+		print(f"(declare-fun AL2B_{i} () (_ BitVec 1)) ",file=f)   
+		print(f"(declare-fun nx0B_{i} () (_ BitVec 1)) ",file=f)   
+		print(f"(declare-fun ny0B_{i} () (_ BitVec 1)) ",file=f)   
 
+	# creating variables : key bits
 	print(f"(declare-fun kT () (_ BitVec {2*rds}))",file=f)
 	print(f"(declare-fun kB () (_ BitVec {2*rds}))",file=f)
 
-
+	# creating variables : cost over the E_m rounds
 	for i in range(nE0,fwd_rds-1):
 		print(f"(declare-fun PAY1T_{i} () (_ BitVec 1)) ",file=f)
 		print(f"(declare-fun PAY2T_{i} () (_ BitVec 1)) ",file=f)
-
 
 	for i in range(nE0+1,fwd_rds):
 		print(f"(declare-fun PAY1B_{i} () (_ BitVec 1)) ",file=f)
@@ -86,7 +91,7 @@ def core(nE0,nEm,nE1,f, sk=False):
 	print(f"(declare-fun summary_pay () (_ BitVec {4*(nE0+nEm+nE1-1)}))",file=f)
 
 
-	#Associate all payments in one vector
+	# associate all probabilist costs in one vector
 	for i in range(nE0):
 		print(f"(assert (= {bit('summary_pay',4*i)} AL1T_{i}) ) ",file=f)
 		print(f"(assert (= {bit('summary_pay',4*i+1)} AL1T_{i}) ) ",file=f)
@@ -106,14 +111,14 @@ def core(nE0,nEm,nE1,f, sk=False):
 		print(f"(assert (= {bit('summary_pay',4*(i+nE0+nEm-1)+3)} AL2B_{nE0+nEm+i}) ) ",file=f)
 
 
-	#key schedule
+	# key schedule
 	print(f"(assert (= ((_ extract  {2*rds-1} 80) kT)  (bvxor (bvxor ((_ extract {2*rds-81} 0) kT) ((_ extract  {2*rds-62} 19) kT))  (bvxor ((_ extract  {2*rds-51} 30) kT) ((_ extract  {2*rds-14} 67) kT))))) ",file=f)
 	print(f"(assert (= ((_ extract  {2*rds-1} 80) kB)  (bvxor (bvxor ((_ extract  {2*rds-81} 0) kB) ((_ extract  {2*rds-62} 19) kB))  (bvxor ((_ extract  {2*rds-51} 30) kB) ((_ extract  {2*rds-14} 67) kB)))))",file=f)
 	if sk:
 		print(f"(assert (= kT {i2v(0,2*rds)}))",file=f)
 		print(f"(assert (= kB {i2v(0,2*rds)}))",file=f)
 
-	#Force activity
+	# force activity
 	print(f"(assert( or (or (not (= xT_0 {i2v(0,13)})) (not (= yT_0 {i2v(0,19)}))) (not (= kT {i2v(0,2*rds)}))))",file=f)
 	print(f"(assert( or (or (not (= xB_{rds} {i2v(0,13)})) (not (= yB_{rds} {i2v(0,19)}))) (not (= kB {i2v(0,2*rds)}))))",file=f)
 
@@ -128,7 +133,7 @@ def core(nE0,nEm,nE1,f, sk=False):
 
 
 
-	# Forward differential
+	# forward differential
 	for i in range(nE0):
 		# compute AL1 ie, activity of the AND in register L2
 		print(f"(assert (=  AL1T_{i} (bvor (bvor ((_ extract 6 6) yT_{i}) ((_ extract 8 8) yT_{i}) ) (bvor ((_ extract 10 10) yT_{i})  ((_ extract 15 15) yT_{i}) ) )  ))",file=f)
@@ -147,7 +152,7 @@ def core(nE0,nEm,nE1,f, sk=False):
 		print(f"(assert (= #b0  (bvand (bvxor ((_ extract 18 18) yT_{i+1}) ny0T_{i} ) (bvxor AL2T_{i} #b1  ) )  ) )",file=f)
 
 
-	# Backward differential
+	# backward differential
 	for i in range(fwd_rds,rds):
 		# compute AL1 ie, activity of the AND in register L2
 		print(f"(assert (=  AL1B_{i} (bvor (bvor ((_ extract 6 6) yB_{i}) ((_ extract 8 8) yB_{i}) ) (bvor ((_ extract 10 10) yB_{i})  ((_ extract 15 15) yB_{i}) ) )  ))",file=f)
@@ -165,13 +170,13 @@ def core(nE0,nEm,nE1,f, sk=False):
 		# assign nx0 to the msb of x if AL = 0
 		print(f"(assert (= #b0  (bvand (bvxor ((_ extract 18 18) yB_{i+1}) ny0B_{i} ) (bvxor AL2B_{i} #b1  ) )  ) )",file=f)
 
-	# Middle part
+	# middle part
 	print(f"(assert (=  uxT_{nE0} {i2v(0,13)} ))",file=f)
 	print(f"(assert (=  uyT_{nE0} {i2v(0,19)} ))",file=f)
 	print(f"(assert (=  uxB_{fwd_rds} {i2v(0,13)} ))",file=f)
 	print(f"(assert (=  uyB_{fwd_rds} {i2v(0,19)} ))",file=f)
 
-	# Normalization (ux = 1 => x = 0)
+	# normalization (ux = 1 => x = 0) (unknown = 1 => diff = 0)
 	for i in range(nE0,fwd_rds):
 		print(f"(assert (=  (bvand uxT_{i}  xT_{i}) {i2v(0,13)} ))",file=f)
 		print(f"(assert (=  (bvand uyT_{i}  yT_{i}) {i2v(0,19)} ))",file=f)
@@ -180,7 +185,7 @@ def core(nE0,nEm,nE1,f, sk=False):
 		print(f"(assert (=  (bvand uyB_{i}  yB_{i}) {i2v(0,19)} ))",file=f)
 
 
-	#shifting
+	# shifting
 	for i in range(nE0,fwd_rds-1):
 		print(f"(assert (= (bvlshr uxT_{i} {i2v(1,13)}) (bvand uxT_{i+1} {i2v(2**12-1,13)}) ) ) ",file=f)
 		print(f"(assert (= (bvlshr uyT_{i} {i2v(1,19)}) (bvand uyT_{i+1} {i2v(2**18-1,19)}) ) ) ",file=f)
@@ -210,7 +215,7 @@ def core(nE0,nEm,nE1,f, sk=False):
 			print(f"(assert (= (bvand (bvand (bvnot AL2T_{i}) (bvnot {bit(f'uyT_{i+1}',18)})) {bit(f'yT_{i+1}',18)} ) (bvand (bvand (bvnot AL2T_{i}) (bvnot {bit(f'uyT_{i+1}',18)}) ) (bvxor (bvxor {bit('kT',2*i)}  {bit(f'xT_{i}',9)}) (bvxor  {bit(f'xT_{i}',0)}   {bit(f'xT_{i}',5)}))))) ",file=f)
 
 
-		# If active, PAY <=> known
+		# if active, PAY <=> known
 		print(f"(assert (= PAY1T_{i} (bvand AL1T_{i} (bvnot ((_ extract 12 12 ) uxT_{i+1})))))",file=f)
 		print(f"(assert (= PAY2T_{i} (bvand AL2T_{i} (bvnot ((_ extract 18 18 ) uyT_{i+1})))))",file=f)
 
@@ -235,13 +240,13 @@ def core(nE0,nEm,nE1,f, sk=False):
 			print(f"(assert (= (bvand (bvand (bvnot AL2B_{i}) (bvnot {bit(f'uxB_{i}',0)})) {bit(f'xB_{i}',0)} ) (bvand (bvand (bvnot AL2B_{i}) (bvnot {bit(f'uxB_{i}',0)}) ) (bvxor (bvxor {bit('kB',2*i)}  {bit(f'xB_{i}',9)}) (bvxor  {bit(f'yB_{i+1}',18)}   {bit(f'xB_{i}',5)}))))) ",file=f)
 
 
-		# If active, PAY <=> known
+		# if active, PAY <=> known
 		print(f"(assert (= PAY1B_{i} (bvand AL1B_{i} (bvnot {bit(f'uyB_{i}',0)}))))",file=f)
 		print(f"(assert (= PAY2B_{i} (bvand AL2B_{i} (bvnot {bit(f'uxB_{i}',0)}))))",file=f)
 
-	#BCT constraints
+	# BCT constraints
 	for i in range(nE0,fwd_rds):
-		# force known value of all BCT and
+		# force known value of all BCT 
 		print(f"(assert (= #b0 (bvand {bit(f'uyT_{i}',6)} (bvor {bit(f'yB_{i+1}',7)} {bit(f'uyB_{i+1}',7)}))))",file=f)
 		print(f"(assert (= #b0 (bvand {bit(f'uyB_{i+1}',7)} (bvor {bit(f'yT_{i}',6)} {bit(f'uyT_{i}',6)}) )))",file=f)
 		print(f"(assert (= #b0 (bvand {bit(f'uyT_{i}',8)} (bvor {bit(f'yB_{i+1}',5)} {bit(f'uyB_{i+1}',5)}))))",file=f)
@@ -256,9 +261,9 @@ def core(nE0,nEm,nE1,f, sk=False):
 		print(f"(assert (= #b0 (bvand {bit(f'uxT_{i}',4)} (bvor {bit(f'xB_{i+1}',6)} {bit(f'uxB_{i+1}',6)}))))",file=f)
 		print(f"(assert (= #b0 (bvand {bit(f'uxB_{i+1}',6)} (bvor {bit(f'xT_{i}',4)} {bit(f'uxT_{i}',4)}) )))",file=f)
 
-		# Constraint = 0 for AL1
+		# constraint = 0 for AL1
 		print(f"(assert (= #b0 (bvxor (bvxor (bvand {bit(f'yT_{i}',6)}   {bit(f'yB_{i+1}',7)}) (bvand {bit(f'yT_{i}',8)}   {bit(f'yB_{i+1}',5)})  ) (bvxor (bvand {bit(f'yT_{i}',10)}   {bit(f'yB_{i+1}',14)}) (bvand {bit(f'yT_{i}',15)}   {bit(f'yB_{i+1}',9)})  ))))",file=f)
-		# Constraint = 0 for AL2
+		# constraint = 0 for AL2
 		print(f"(assert (= #b0 (bvxor (bvand {bit(f'xT_{i}',7)}   {bit(f'xB_{i+1}',3)}) (bvand {bit(f'xT_{i}',4)}   {bit(f'xB_{i+1}',6)})  )))",file=f)
 
 
@@ -286,6 +291,7 @@ def footer(nE0,nEm,nE1,f):
 
 	print("(check-sat)",file=f)
 
+	# getting solution
 	for i in range(nE0+nEm):
 		print(f"(get-value ( xT_{i}))",file=f)
 		print(f"(get-value ( yT_{i}))",file=f)
@@ -323,12 +329,9 @@ def footer(nE0,nEm,nE1,f):
 			print(f"(get-value ( PAY1B_{i+1}))",file=f)
 			print(f"(get-value ( PAY2B_{i+1}))",file=f)
 
-
-
 	for i in range(nE0+nEm,nE0+nEm+nE1):
 		print(f"(get-value ( AL1B_{i}))",file=f)
 		print(f"(get-value ( AL2B_{i}))",file=f)
-
 
 	print("(exit)",file=f)
 

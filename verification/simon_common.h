@@ -4,7 +4,7 @@
  * Authors:
  * Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
  *
- * Simon functions are optimized from the NSA reference implementation: https://nsacyber.github.io/simon-speck/implementations/ImplementationGuide1.1.pdf
+ * Simon functions are adapted from the NSA reference implementation: https://nsacyber.github.io/simon-speck/implementations/ImplementationGuide1.1.pdf
  *
  */
 

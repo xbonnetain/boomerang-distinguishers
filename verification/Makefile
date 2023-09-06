@@ -1,10 +1,11 @@
 CC=gcc
 CFLAGS=-fopenmp
 LDLIBS=-lm
+EXEC = katan simon_rxd simon_rk simon_rx
 
-all : katan simon_rxd simon_rk simon_rx
+all : $(EXEC)
 
 clean:
-	rm -f katan simon_rxd simon_rk simon_rx
+	rm -f $(EXEC)
 
 .PHONY: clean

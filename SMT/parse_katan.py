@@ -1,5 +1,5 @@
 #
-# SMT model generator for Simon32 boomerangs
+# SMT output parser for Katan32 boomerangs
 #
 # Authors:
 # Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria

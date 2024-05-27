@@ -1,11 +1,3 @@
-#
-# SMT output parser for Simon32 boomerangs
-#
-# Authors:
-# Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria
-#
-
-
 import sys
 import re
 from parse_SMT import *
@@ -19,6 +11,8 @@ def print_trails(d):
     lkb = []
     if len(d) == 0:
         return
+    #print("kT : ", d["kT"])
+    #print("kB : ", d["kB"])
     ind = d["lftT_0"]+d["rgtT_0"]
     while not end:
         end = True
@@ -57,7 +51,9 @@ def print_trails(d):
             rgtB = merge(d[f'rgtB_{rd}'], u_rgtB)
             outd=lftB+rgtB
             e1+=1
-        print(f"{rd}\t {kT}  {lftT} {rgtT} | {lftB} {rgtB}  {kB}")
+        #        bct = simon_bct(lftT,lftB)
+        bct = ""
+        print(f"{rd}\t {kT}  {lftT} {rgtT} | {lftB} {rgtB}  {kB} || {bct}")
         rd+=1
 
     rd-=2

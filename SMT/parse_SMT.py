@@ -1,10 +1,3 @@
-#
-# Basic SMT output parser utilities
-#
-# Authors:
-# Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
-#
-
 import re
 
 def parse_line(d,line):

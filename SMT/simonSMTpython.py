@@ -1,5 +1,5 @@
 #
-# SMT model generator for Simon32 boomerangs
+# SMT model generator for Simon (impossible) boomerangs
 #
 # Authors:
 # Xavier Bonnetain and Virginie Lallemand, Université de Lorraine, CNRS, Inria, LORIA
@@ -11,70 +11,165 @@
 
 
 
-import sys
+
+
+import sys, argparse
 
 
 def shift(s,i):
 	return f"((_ rotate_left {i}) {s})"
 
-def usage():
-	print("""
-Usage: python simonSMTpython.py tag start_round E0_rounds Em_rounds E1_round target_probability
+def i2v(i,l):
+	# Yup.
+	if i < 0:
+		i=2**l+i
+	return "#b{:0{l}b}".format(i,l=l)
 
-	tag:
-		rk: related-key boomerang
-		rot: rotational-xor related-key boomerang
-		rxd: rotational-xor-differential related-key boomerang
+def zero(l):
+	return i2v(0,l)
 
-	Generate SMT model for boomerang with probability 2^{-target_probability}
-""",file=sys.stderr)
-	exit()
+def minus_one(l):
+	return i2v(-1,l)
+
+def key_args(key, i, key_length):
+	return key+f" {key}".join(map(str,range(i,i+key_length)))
+
+
+simon_keys = { 16 : [32], 32 : [64], 48 : [72,96], 64 : [96,128], 96 : [96,144], 128 : [128,192,256] }
+
+
+simon_z = {
+	0 : [1,1,1,1,1,0,1,0,0,0,1,0,0,1,0,1,0,1,1,0,0,0,0,1,1,1,0,0,1,1,0,1,1,1,1,1,0,1,0,0,0,1,0,0,1,0,1,0,1,1,0,0,0,0,1,1,1,0,0,1,1,0],
+	1 : [1,0,0,0,1,1,1,0,1,1,1,1,1,0,0,1,0,0,1,1,0,0,0,0,1,0,1,1,0,1,0,1,0,0,0,1,1,1,0,1,1,1,1,1,0,0,1,0,0,1,1,0,0,0,0,1,0,1,1,0,1,0],
+	2 : [1,0,1,0,1,1,1,1,0,1,1,1,0,0,0,0,0,0,1,1,0,1,0,0,1,0,0,1,1,0,0,0,1,0,1,0,0,0,0,1,0,0,0,1,1,1,1,1,1,0,0,1,0,1,1,0,1,1,0,0,1,1],
+	3 : [1,1,0,1,1,0,1,1,1,0,1,0,1,1,0,0,0,1,1,0,0,1,0,1,1,1,1,0,0,0,0,0,0,1,0,0,1,0,0,0,1,0,1,0,0,1,1,1,0,0,1,1,0,1,0,0,0,0,1,1,1,1],
+	4 : [1,1,0,1,0,0,0,1,1,1,1,0,0,1,1,0,1,0,1,1,0,1,1,0,0,0,1,0,0,0,0,0,0,1,0,1,1,1,0,0,0,0,1,1,0,0,1,0,1,0,0,1,0,0,1,1,1,0,1,1,1,1]
+	}
+
+
+size_z = {
+	16 : { 4 : 0 }, # Toy cipher for experimental tests
+	32 : { 4 : 0 },
+	48 : { 3 : 0, 4 : 1 },
+	64 : { 3 : 2, 4 : 3 },
+	96 : { 2 : 2, 3 : 3 },
+	128 : { 2 : 2, 3 : 3, 4 : 4 }
+	}
+
+def valid_simon(size,key):
+	return size in simon_keys and key in simon_keys[size]
 
 def main():
-	name = sys.argv[0]
-	if len(sys.argv)!=7:
-		usage()
-	tag = sys.argv[1]
-	if tag == "rxd":
-		rk_d = True
-		rotational = True
-		s = "RXD"
-	elif tag == "rk":
-		s = "RK"
-		rotational = False
-		rk_d = False
-	elif tag == "rot":
-		s = "Rotational-xor"
-		rotational = True
-		rk_d = False
+	parser = argparse.ArgumentParser(description ="Generates an SMT model for boomerang search on Simon with given probability.")
+	parser.add_argument("-i", "--impossible", dest='impossible', action='store_true', help="model an impossible boomerang")
+	parser.add_argument("-d","--rx_d", dest='rx_d', action='store_true', help="model a rotational-xor-differential boomerang")
+	parser.add_argument("-x","--rotational", dest='rotational', action='store_true', help="model a rotational-xor boomerang")
+	parser.add_argument("--rotation-index", dest='rotation', type=int, default=1, help="Rotation index (default 1)")
+	parser.add_argument("--lower-rotation-index", dest='lower_rotation', type=int, default=None, help="Rotation index for the lower trail (default equal rotation index)")
+	parser.add_argument("-r", "--start_round", dest='start_round', type=int,default=0,help="starting point of the distinguisher (only relevant with rotational-xor differences, default first round)")
+	parser.add_argument("-n", "--no-key-difference", dest='single', action='store_true', help="model a single-key boomerang")
+	parser.add_argument("-s", "--size", dest='size', type=int,default=32,choices=[16, 32, 48, 64, 96, 128], help="block size of Simon (default 32)")
+	parser.add_argument("-k", "--key", dest='key', type=int,default=64,choices=[32, 64, 72, 96, 128, 144, 192, 256], help="key size of Simon (default 64)")
+	parser.add_argument("--input_weight", dest='input_weight', type=int,default=-1, help="Force input difference weight")
+	parser.add_argument("--output_weight", dest='output_weight', type=int,default=-1, help="Force output difference weight")
+	parser.add_argument("top",metavar='E0', type=int, help="number of rounds in the top trail")
+	parser.add_argument("middle",metavar='Em', type=int,help="number of intermingling trail rounds")
+	parser.add_argument("bottom",metavar='E1', type=int, help="number of rounds in the bottom trail")
+	parser.add_argument("proba",metavar='p', type=int,nargs='?',default=0,help="-log2 of target probability (default 0)")
+	args = parser.parse_args()
+	rotational = args.rotational or args.rx_d
+	if args.impossible and args.rx_d:
+		print("Impossible rotational-xor-differential boomerangs are not supported",file=sys.stderr)
+		exit(1)
+	if not valid_simon(args.size,args.key):
+		print(f"Unsupported Simon version: {args.size}/{args.key}",file=sys.stderr)
+		exit(1)
+
+	if args.impossible and args.proba > 0:
+		print("Warning: Impossible boomerang with proba < 1",file=sys.stderr)
+
+	if args.single and (args.rotational or args.rx_d):
+		print("Warning: Single key rotational-xor distinguisher",file=sys.stderr)
+
+	if not rotational and args.start_round > 0:
+		print("Warning: Irrelevant to start at a different round without rotations",file=sys.stderr)
+
+	s = ""
+	end= f"starting round {args.start_round}"
+	if args.rx_d:
+		s = "rotational-xor-differential"
+	elif args.rotational:
+		s = "rotational-xor"
+	elif not args.single:
+		s = "related-key"
+		end=""
 	else:
-		usage()
-
-	start_round = int(sys.argv[2])
-	nE0 = int(sys.argv[3])
-	nEm = int(sys.argv[4])
-	nE1 = int(sys.argv[5])
-	obj = int(sys.argv[6])
-	print_query(start_round, nE0, nEm, nE1,obj,check_instanciable=True,rk_d=rk_d, rotational=rotational)
-	print(f"\nGenerated {s} constraints for {nE0+nEm+nE1} rounds (cut {nE0}+{nEm}+{nE1}) objective {obj}",file=sys.stderr)
+		s= "single-key"
+		end = ""
+	if args.impossible:
+		s="impossible "+s
+	print_query(args)
+	print(f"\nGenerated {s} boomerang constraints for Simon {args.size}/{args.key} {args.top+args.middle+args.bottom} rounds (cut {args.top}+{args.middle}+{args.bottom}) objective {args.proba} {end}",file=sys.stderr)
 
 
-# startingIndex: round at which starts the distinguisher
-# NbrE0: number of rounds in E0
-# NbrEm: number of middle round conditions to be checked
-# NbrE1: number of rounds in E1
-# obj: aimed distinguisher probability
-# check_instanciable: check that there exists one quartet of messages and keys that follow the characteristic
-# rk_d: for rxd
-# rotational: for rot and rxd
-def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False,rk_d=False, rotational=True):
-	# objective probability
-	OBJ = bin(obj)[2:].zfill(16)
 
-	# constant for key schedule: z0 for Simon 32
-	z0_full = [1,1,1,1,1,0,1,0,0,0,1,0,0,1,0,1,0,1,1,0,0,0,0,1,1,1,0,0,1,1,0,1,1,1,1,1,0,1,0,0,0,1,0,0,1,0,1,0,1,1,0,0,0,0,1,1,1,0,0,1,1,0]
+# definition of the Hamming weight function on nbr-bit numbers
+def hamming_weight(nbr, fun_name="w_H"):
+	i= 0
+	call = "x"
+	nb = nbr
+	while(nb > 1):
+		mask = "#b"+((("0"*(2**i)+"1"*(2**i))*nbr)[-nbr:])
+		print(f" (define-fun {fun_name}{i} ((x (_ BitVec {nbr}))) (_ BitVec {nbr}) (bvadd (bvand x {mask} ) (bvand (bvlshr x {i2v(2**i,nbr)}) {mask} )))")
+		call = f"({fun_name}{i} {call})"
+		i=i+1
+		nb = int(nb/2) + (i%2)
+	print(f" (define-fun {fun_name} ((x (_ BitVec {nbr}))) (_ BitVec {nbr}) {call})")
 
-	z0 = z0_full[startingIndex:]
+
+
+
+def print_query(args):
+	startingIndex = args.start_round
+	NbrE0 = args.top
+	NbrEm = args.middle
+	NbrE1 = args.bottom
+	obj = args.proba
+	size = args.size
+	key = args.key
+	rotational = args.rotational or args.rx_d
+	rotation_index=args.rotation
+	rx_d = args.rx_d
+	impossible = args.impossible
+	single_key = args.single
+
+	input_weight = args.input_weight
+	output_weight = args.output_weight
+
+	#The code support this options
+	check_instanciable=False
+
+
+	if not (rotational):
+		rotation_index  = 0
+
+	lower_rotation_index = rotation_index
+
+	if rx_d:
+		lower_rotation_index = 0
+	elif args.lower_rotation is not None:
+		lower_rotation_index = args.lower_rotation
+
+	branch_size = size // 2
+	key_length = key // branch_size
+
+	# obj probability
+	OBJ = bin(obj)[2:].zfill(branch_size)
+
+	# constant for key schedule: z0 for Simon 32, and so on
+	zi_full = simon_z[size_z[size][key_length]]
+
+	zi = zi_full[startingIndex:]
 
 	# -------------------------------- parameters for the solver  --------------------------------
 	print("(set-logic QF_ABV)")
@@ -83,93 +178,160 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 
 	# --------------------------------  creating variables  --------------------------------------
 
-	# definition of the Hamming weight function
-	print(" (define-fun w_H0 ((x (_ BitVec 16))) (_ BitVec 16) ")
-	print("       (bvadd (bvand x #x5555 ) ")
-	print("              (bvand (bvlshr x #x0001) #x5555 ))) ")
-	print(" (define-fun w_H1 ((x (_ BitVec 16))) (_ BitVec 16) ")
-	print("       (bvadd (bvand x #x3333 ) ")
-	print("              (bvand (bvlshr x #x0002) #x3333 ))) ")
-	print(" (define-fun w_H2 ((x (_ BitVec 16))) (_ BitVec 16) ")
-	print("       (bvadd (bvand x #x0f0f ) ")
-	print("              (bvand (bvlshr x #x0004) #x0f0f))) ")
-	print(" (define-fun w_H3 ((x (_ BitVec 16))) (_ BitVec 16) ")
-	print("       (bvadd (bvand x #x00ff ) ")
-	print("              (bvand (bvlshr x #x0008) #x00ff ))) ")
-	print(" (define-fun w_H ((x (_ BitVec 16))) (_ BitVec 16) (w_H3 (w_H2 (w_H1 (w_H0 x))))) ")
-
+	# definition of the Hamming weight function (w_H x)
+	hamming_weight(branch_size)
 
 
 	for i in range(NbrE0+NbrEm+NbrE1):										#  TOP and BOTTOM key
-		print("(declare-fun kT_",i," () (_ BitVec 16))", sep = '')			#  for key schedule
-		print("(declare-fun kB_",i," () (_ BitVec 16))", sep = '')			#  for key schedule
+		print(f"(declare-fun kT_{i} () (_ BitVec {branch_size}))")			#  for key schedule
+		print(f"(declare-fun kB_{i} () (_ BitVec {branch_size}))")			#  for key schedule
 
 
-	for i in range(NbrE0+NbrEm+NbrE1-4):
-		print("(declare-fun c_",i," () (_ BitVec 16))", sep = '') 			# constant for key schedule
+	for i in range(NbrE0+NbrEm+NbrE1-key_length):
+		print(f"(declare-fun c_{i} () (_ BitVec {branch_size}))") 			# constant for key schedule
 	
 	
 	#									TOP TRAIL
 
 	for i in range(NbrE0+NbrEm):										#				indices (0) to (NbrE0 + NbrEm -1 )
-		print("(declare-fun lftT_",i," () (_ BitVec 16))", sep = '')	# lft, diff
-		print("(declare-fun rgtT_",i," () (_ BitVec 16))", sep = '')	# rgt, diff
+		print(f"(declare-fun lftT_{i} () (_ BitVec {branch_size}))")	# lft, diff
+		print(f"(declare-fun rgtT_{i} () (_ BitVec {branch_size}))")	# rgt, diff
 
-		print("(declare-fun u_lftT_",i," () (_ BitVec 16))", sep = '')	# known lft, diff
-		print("(declare-fun u_rgtT_",i," () (_ BitVec 16))", sep = '')	# known rgt, diff
+		print(f"(declare-fun u_lftT_{i} () (_ BitVec {branch_size}))")	# known lft, diff
+		print(f"(declare-fun u_rgtT_{i} () (_ BitVec {branch_size}))")	# known rgt, diff
 
 	for i in range(NbrE0+NbrEm-1):
-		print("(declare-fun keyT_",i," () (_ BitVec 16))", sep = '')	# key, diff
-		print("(declare-fun wrT_",i," () (_ BitVec 16))", sep = '')		#  HW of z, ie proba of 1 round
+		print(f"(declare-fun keyT_{i} () (_ BitVec {branch_size}))")	# key, diff
+		print(f"(declare-fun wrT_{i} () (_ BitVec {branch_size}))")		#  HW of z, ie proba of 1 round
 
 	for i in range(NbrE0):
-		print("(declare-fun dT_",i," () (_ BitVec 16))", sep = '')			# = \gamma from https://ia.cr/2015/145
-		print("(declare-fun varibitsT_",i," () (_ BitVec 16))", sep = '')	#  varibits notation from https://ia.cr/2015/145
-		print("(declare-fun doublebitsT_",i," () (_ BitVec 16))", sep = '')	#  doublebits notation from https://ia.cr/2015/145
-		print("(declare-fun zT_",i," () (_ BitVec 16))", sep = '')			#  z = varibits + doublebits
+		print(f"(declare-fun dT_{i} () (_ BitVec {branch_size}))")			# = \gamma from https://ia.cr/2015/145
+		print(f"(declare-fun varibitsT_{i} () (_ BitVec {branch_size}))")	#  varibits notation from https://ia.cr/2015/145
+		print(f"(declare-fun doublebitsT_{i} () (_ BitVec {branch_size}))")	#  doublebits notation from https://ia.cr/2015/145
+		print(f"(declare-fun zT_{i} () (_ BitVec {branch_size}))")			#  z = varibits + doublebits
 
 
 	#									BOTTOM TRAIL
 
 	for i in range(NbrEm+NbrE1):												# BOTTOM TRAIL = Em + E1   	 indices (NbrE0 + 1) to (NbrE0 + NbrEm + NbrE1 )
-		print("(declare-fun lftB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')	# lft, diff
-		print("(declare-fun rgtB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')	# rgt, diff
+		print(f"(declare-fun lftB_{i+NbrE0+1} () (_ BitVec {branch_size}))")	# lft, diff
+		print(f"(declare-fun rgtB_{i+NbrE0+1} () (_ BitVec {branch_size}))")	# rgt, diff
 
-		print("(declare-fun u_lftB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')	# known lft, diff
-		print("(declare-fun u_rgtB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')	# known rgt, diff
+		print(f"(declare-fun u_lftB_{i+NbrE0+1} () (_ BitVec {branch_size}))")	# known lft, diff
+		print(f"(declare-fun u_rgtB_{i+NbrE0+1} () (_ BitVec {branch_size}))")	# known rgt, diff
 
 
 	for i in range(NbrEm+NbrE1-1):
-		print("(declare-fun keyB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')	# key, diff
-		print("(declare-fun wrB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')		#  HW of z, ie proba of 1 round
+		print(f"(declare-fun keyB_{i+NbrE0+1} () (_ BitVec {branch_size}))")	# key, diff
+		print(f"(declare-fun wrB_{i+NbrE0+1} () (_ BitVec {branch_size}))")			#  HW of z, ie proba of 1 round
 
 	for i in range(NbrE1):
-		print("(declare-fun dB_"			,i+NbrE0+NbrEm," () (_ BitVec 16))", sep = '')	# = \gamma from https://ia.cr/2015/145
-		print("(declare-fun varibitsB_"		,i+NbrE0+NbrEm," () (_ BitVec 16))", sep = '')	#  varibits notation from https://ia.cr/2015/145
-		print("(declare-fun doublebitsB_"	,i+NbrE0+NbrEm," () (_ BitVec 16))", sep = '')	#  doublebits notation from https://ia.cr/2015/145
-		print("(declare-fun zB_"			,i+NbrE0+NbrEm," () (_ BitVec 16))", sep = '')	#  z = varibits + doublebits
+		print(f"(declare-fun dB_{i+NbrE0+NbrEm} () (_ BitVec {branch_size}))")	# = \gamma from https://ia.cr/2015/145
+		print(f"(declare-fun varibitsB_{i+NbrE0+NbrEm} () (_ BitVec {branch_size}))")	#  varibits notation from https://ia.cr/2015/145
+		print(f"(declare-fun doublebitsB_{i+NbrE0+NbrEm} () (_ BitVec {branch_size}))")	#  doublebits notation from https://ia.cr/2015/145
+		print(f"(declare-fun zB_{i+NbrE0+NbrEm} () (_ BitVec {branch_size}))")	#  z = varibits + doublebits
+
+
+	#									MIDDLE TRAIL
+	if impossible:
+		print(f"(declare-fun summarymask () (_ BitVec {branch_size*NbrEm}))")
+		print(f"(assert (not (= summarymask {i2v(0,branch_size*NbrEm)})))")
+
+
+	for i in range(NbrEm-1):
+
+		print(f"(declare-fun PayT_{i+NbrE0} () (_ BitVec {branch_size}))")
+		print(f"(declare-fun PayB_{i+NbrE0+1} () (_ BitVec {branch_size}))")
+
+		print(f"(declare-fun computableT_{i+NbrE0} () (_ BitVec {branch_size}))")
+		print(f"(declare-fun computableB_{i+NbrE0+1} () (_ BitVec {branch_size}))")
+
+		print(f"(declare-fun chosenValueT_{i+NbrE0} () (_ BitVec {branch_size}))")
+		print(f"(declare-fun chosenValueB_{i+NbrE0+1} () (_ BitVec {branch_size}))")
+
+		print(f"(declare-fun computedValueT_{i+NbrE0} () (_ BitVec {branch_size}))")
+		print(f"(declare-fun computedValueB_{i+NbrE0+1} () (_ BitVec {branch_size}))")
+
+		print(f"(declare-fun doublebitsT_{i+NbrE0} () (_ BitVec {branch_size}))")
+		print(f"(declare-fun doublebitsB_{i+NbrE0+1} () (_ BitVec {branch_size}))")
+
+	if impossible:
+		for i in range(NbrEm):
+			print(f"(declare-fun constraintmask_{i+NbrE0} () (_ BitVec {branch_size}))")
+			print(f"(assert (= ((_ extract {branch_size*(i+1)-1} {branch_size*i}) summarymask ) constraintmask_{i+NbrE0} ))")
+
+
+	#Force non-trivial trail
+	if not rotational and not impossible:
+		print(f"(assert (or (or (not (= lftT_{0} {zero(branch_size)})) (not (= rgtT_{0} {zero(branch_size)}))) (or (or (not (= {zero(branch_size)} kT_{0})) (not (= {zero(branch_size)} kT_{1}))) (or (not (= {zero(branch_size)} kT_{2})) (not (= {zero(branch_size)} kT_{3}))))))")
+		print(f"(assert (or (or (not (= lftB_{NbrEm+NbrE1} {zero(branch_size)})) (not (= rgtB_{NbrEm+NbrE1} {zero(branch_size)}))) (or (or (not (= {zero(branch_size)} kB_{0})) (not (= {zero(branch_size)} kB_{1}))) (or (not (= {zero(branch_size)} kB_{2})) (not (= {zero(branch_size)} kB_{3}))))))")
+
+	if rx_d :
+		print(f"(assert (or (not (= lftB_{NbrE0+NbrEm+NbrE1} {zero(branch_size)})) (not (= rgtB_{NbrE0+NbrEm+NbrE1} {zero(branch_size)}))))")
+
+
+	# -----------------------------------------------  KEY SCHEDULE --------------------------------------------
+
+	# key schedule for the top and bottom keys, for all the rounds
+	# gives the kT and kB
+
+	print(f"(define-fun key_schedule_2 ( (c (_ BitVec {branch_size})) (k0 (_ BitVec {branch_size})) (k1 (_ BitVec {branch_size})) ) (_ BitVec {branch_size}) (bvxor (bvxor ((_ rotate_right 4) k1) ((_ rotate_right 3) k1)) (bvxor k0 c)))")
+	print(f"(define-fun key_schedule_3 ( (c (_ BitVec {branch_size})) (k0 (_ BitVec {branch_size})) (k1 (_ BitVec {branch_size})) (k2 (_ BitVec {branch_size})) ) (_ BitVec {branch_size}) (bvxor (bvxor ((_ rotate_right 4) k2) ((_ rotate_right 3) k2)) (bvxor k0 c)))")
+	print(f"(define-fun key_schedule_4 ( (c (_ BitVec {branch_size})) (k0 (_ BitVec {branch_size})) (k1 (_ BitVec {branch_size})) (k2 (_ BitVec {branch_size})) (k3 (_ BitVec {branch_size})) ) (_ BitVec {branch_size}) (bvxor ((_ rotate_right 1)(bvxor ((_ rotate_right 3) k3) k1)) (bvxor (bvxor k0 c) (bvxor ((_ rotate_right 3) k3) k1))))")
+
+	if key_length not in [2,3,4]:
+		print("Unsupported key schedule",file=sys.stderr)
+		exit(3)
+
+	if not single_key:
+		for i in range(NbrE0+NbrEm+NbrE1-key_length):
+			print(f"(assert (= c_{i} {i2v(-4+zi[i % 31],branch_size)}))") # cst = fffd if bit = 1
+			print(f"(assert (= kT_{i+key_length} (key_schedule_{key_length} (bvxor ((_ rotate_left {rotation_index}) c_{i}) c_{i}) {key_args('kT_',i,key_length)} )))")
+			if not rx_d:
+				print(f"(assert (= kB_{i+key_length} (key_schedule_{key_length} (bvxor ((_ rotate_left {rotation_index}) c_{i}) c_{i}) {key_args('kB_',i,key_length)} )))")
+
+
+	for i in range(NbrE0+NbrEm+NbrE1):
+		if rx_d or single_key:
+			print(f"(assert ( = {zero(branch_size)} kB_{i}))")
+		if single_key:
+			print(f"(assert ( = {zero(branch_size)} kT_{i}))")
+
+
+	for i in range(NbrE0+NbrEm-1):
+		print("(assert (=  keyT_",i,"  kT_",i,"))", sep = '')
+	for i in range(NbrEm+NbrE1-1):
+		print("(assert (=  keyB_",i+NbrE0+1,"  kB_",i+NbrE0+1,"))", sep = '')
+
+
+	if input_weight > -1:
+		print(f"(assert (= (bvadd (w_H lftT_0) (w_H rgtT_0)) {i2v(input_weight,branch_size)}))")
+
+	if output_weight > -1:
+		print(f"(assert (= (bvadd (w_H lftB_{NbrE0+NbrEm+NbrE1}) (w_H rgtB_{NbrE0+NbrEm+NbrE1})) {i2v(output_weight,branch_size)}))")
+
 
 
 	if check_instanciable:
 		#normal simon Round
-		print(f"(define-fun simon (( l (_ BitVec 16)) (r (_ BitVec 16)) (k (_ BitVec 16))) (_ BitVec 16) (bvxor (bvxor (bvand {shift('l',8)} {shift('l',1)}) {shift('l',2)}) (bvxor r k)))")
+		print(f"(define-fun simon (( l (_ BitVec {branch_size})) (r (_ BitVec {branch_size})) (k (_ BitVec {branch_size}))) (_ BitVec {branch_size}) (bvxor (bvxor (bvand {shift('l',8)} {shift('l',1)}) {shift('l',2)}) (bvxor r k)))")
 
 
 		for i in range(NbrE0+NbrEm+NbrE1+1):
-			print("(declare-fun vl0_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun vl1_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun vl2_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun vl3_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun vr0_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun vr1_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun vr2_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun vr3_",i," () (_ BitVec 16))", sep = '')
+			print(f"(declare-fun vl0_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun vl1_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun vl2_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun vl3_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun vr0_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun vr1_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun vr2_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun vr3_{i} () (_ BitVec {branch_size}))")
 
 		for i in range(NbrE0+NbrEm+NbrE1):
-			print("(declare-fun k0_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun k1_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun k2_",i," () (_ BitVec 16))", sep = '')
-			print("(declare-fun k3_",i," () (_ BitVec 16))", sep = '')
+			print(f"(declare-fun k0_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun k1_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun k2_{i} () (_ BitVec {branch_size}))")
+			print(f"(declare-fun k3_{i} () (_ BitVec {branch_size}))")
 			print(f"(assert (= vr0_{i+1} vl0_{i}))")
 			print(f"(assert (= vr1_{i+1} vl1_{i}))")
 			print(f"(assert (= vr2_{i+1} vl2_{i}))")
@@ -178,74 +340,29 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 			print(f"(assert (= vl1_{i+1} (simon vl1_{i} vr1_{i} k1_{i})))")
 			print(f"(assert (= vl2_{i+1} (simon vl2_{i} vr2_{i} k2_{i})))")
 			print(f"(assert (= vl3_{i+1} (simon vl3_{i} vr3_{i} k3_{i})))")
-			print(f"(assert (= k1_{i} (bvxor kT_{i} {shift(f'k0_{i}',1)})))")
-			print(f"(assert (= k3_{i} (bvxor kT_{i} {shift(f'k2_{i}',1)})))")
-			print(f"(assert (= k3_{i} (bvxor kB_{i} {shift(f'k0_{i}',1)})))")
+
+			print(f"(assert (= k1_{i} (bvxor kT_{i} {shift(f'k0_{i}',rotation_index)})))")
+			print(f"(assert (= k3_{i} (bvxor kT_{i} {shift(f'k2_{i}',rotation_index)})))")
+			if not rx_d:
+				print(f"(assert (= k1_{i} (bvxor kB_{i} {shift(f'k2_{i}',lower_rotation_index)})))")
+			else:
+				print(f"(assert (= k2_{i} k0_{i}))")
+
+		#Comment this line to validate the markov cipher assumption
+		# for i in range(NbrE0+NbrEm+NbrE1-key_length):
+		# 	print(f"(assert( = k0_{i+key_length} (key_schedule_{key_length} c_{i} {key_args('k0_',i,key_length)})))")
 
 		for i in range(NbrE0+NbrEm):
-			print(f"(assert (= (bvor u_lftT_{i} vl1_{i}) (bvor u_lftT_{i} (bvxor {shift(f'vl0_{i}',1)} lftT_{i}))))")
-			print(f"(assert (= (bvor u_lftT_{i} vl3_{i}) (bvor u_lftT_{i} (bvxor {shift(f'vl2_{i}',1)} lftT_{i}))))")
-			print(f"(assert (= (bvor u_rgtT_{i} vr1_{i}) (bvor u_rgtT_{i} (bvxor {shift(f'vr0_{i}',1)} rgtT_{i}))))")
-			print(f"(assert (= (bvor u_rgtT_{i} vr3_{i}) (bvor u_rgtT_{i} (bvxor {shift(f'vr2_{i}',1)} rgtT_{i}))))")
+			print(f"(assert (= (bvor u_lftT_{i} vl1_{i}) (bvor u_lftT_{i} (bvxor {shift(f'vl0_{i}',rotation_index)} lftT_{i}))))")
+			print(f"(assert (= (bvor u_lftT_{i} vl3_{i}) (bvor u_lftT_{i} (bvxor {shift(f'vl2_{i}',rotation_index)} lftT_{i}))))")
+			print(f"(assert (= (bvor u_rgtT_{i} vr1_{i}) (bvor u_rgtT_{i} (bvxor {shift(f'vr0_{i}',rotation_index)} rgtT_{i}))))")
+			print(f"(assert (= (bvor u_rgtT_{i} vr3_{i}) (bvor u_rgtT_{i} (bvxor {shift(f'vr2_{i}',rotation_index)} rgtT_{i}))))")
 		for i in range(NbrE0+1,NbrE0+NbrEm+NbrE1+1):
-			print(f"(assert (= (bvor u_lftB_{i} vl3_{i}) (bvor u_lftB_{i} (bvxor {shift(f'vl0_{i}',1)} lftB_{i}))))")
-			print(f"(assert (= (bvor u_lftB_{i} vl1_{i}) (bvor u_lftB_{i} (bvxor {shift(f'vl2_{i}',1)} lftB_{i}))))")
-			print(f"(assert (= (bvor u_rgtB_{i} vr3_{i}) (bvor u_rgtB_{i} (bvxor {shift(f'vr0_{i}',1)} rgtB_{i}))))")
-			print(f"(assert (= (bvor u_rgtB_{i} vr1_{i}) (bvor u_rgtB_{i} (bvxor {shift(f'vr2_{i}',1)} rgtB_{i}))))")
+			print(f"(assert (= (bvor u_lftB_{i} vl1_{i}) (bvor {shift(f'u_lftB_{i}',rotation_index-lower_rotation_index)} (bvxor {shift(f'vl2_{i}',lower_rotation_index)} {shift(f'lftB_{i}',rotation_index-lower_rotation_index)}))))")
+			print(f"(assert (= (bvor u_lftB_{i} vl3_{i}) (bvor u_lftB_{i} (bvxor {shift(f'vl0_{i}',lower_rotation_index)} lftB_{i}))))")
+			print(f"(assert (= (bvor u_rgtB_{i} vr1_{i}) (bvor {shift(f'u_rgtB_{i}',rotation_index-lower_rotation_index)} (bvxor {shift(f'vr2_{i}',lower_rotation_index)} {shift(f'rgtB_{i}',rotation_index-lower_rotation_index)}))))")
+			print(f"(assert (= (bvor u_rgtB_{i} vr3_{i}) (bvor u_rgtB_{i} (bvxor {shift(f'vr0_{i}',lower_rotation_index)} rgtB_{i}))))")
 
-
-	#									MIDDLE TRAIL
-
-	for i in range(NbrEm-1):
-
-		print("(declare-fun PayT_",i+NbrE0," () (_ BitVec 16))", sep = '')
-		print("(declare-fun PayB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')
-
-		print("(declare-fun computableT_",i+NbrE0," () (_ BitVec 16))", sep = '')
-		print("(declare-fun computableB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')
-
-		print("(declare-fun computedValueT_",i+NbrE0," () (_ BitVec 16))", sep = '')
-		print("(declare-fun computedValueB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')
-
-		print("(declare-fun doublebitsT_",i+NbrE0," () (_ BitVec 16))", sep = '')
-		print("(declare-fun doublebitsB_",i+NbrE0+1," () (_ BitVec 16))", sep = '')
-
-
-
-	if not rotational:
-		print(f"(assert (or (or (not (= lftT_{0} #x0000)) (not (= rgtT_{0} #x0000))) (or (or (not (= #x0000 kT_{0})) (not (= #x0000 kT_{1}))) (or (not (= #x0000 kT_{2})) (not (= #x0000 kT_{3}))))))")
-		print(f"(assert (or (or (not (= lftB_{NbrEm+NbrE1} #x0000)) (not (= rgtB_{NbrEm+NbrE1} #x0000))) (or (or (not (= #x0000 kB_{0})) (not (= #x0000 kB_{1}))) (or (not (= #x0000 kB_{2})) (not (= #x0000 kB_{3}))))))")
-
-	if rk_d :
-		print(f"(assert (or (not (= lftB_{NbrE0+NbrEm+NbrE1} #x0000)) (not (= rgtB_{NbrE0+NbrEm+NbrE1} #x0000))))")
-
-
-	# -----------------------------------------------  KEY SCHEDULE --------------------------------------------
-
-	# key schedule for the top and bottom keys, for all the rounds
-	# gives the kT and kB
-	for i in range(NbrE0+NbrEm+NbrE1-4):
-		if rotational:
-			if (z0[i] == 1):
-				print("(assert (= c_",i," #xfffd))", sep = '') # cst = fffd if bit = 1
-			else :
-				print("(assert (= c_",i," #xfffc))", sep = '') # cst = fffc if bit = 0
-		else :
-				print("(assert (= c_",i," #x0000))", sep = '') # no cst if no rotational
-
-		print("(assert (= kT_",i+4,"  (bvxor ((_ rotate_right 1)(bvxor ((_ rotate_right 3) kT_",i+3,") kT_",i+1,"))(bvxor (bvxor kT_",i,"  (bvxor ((_ rotate_left 1) c_",i,") c_",i,")) (bvxor ((_ rotate_right 3) kT_",i+3,") kT_",i+1,")))))", sep = '')
-		if not rk_d:
-			# k_i+4= (k_i+3 >>> 4) + (k_i+1 >>> 1)  + ki +  (k_i+3>>>3) + (k_i+1) +  c_i <<< 1 + c_i
-			print("(assert (= kB_",i+4,"  (bvxor ((_ rotate_right 1)(bvxor ((_ rotate_right 3) kB_",i+3,") kB_",i+1,"))(bvxor (bvxor kB_",i,"  (bvxor ((_ rotate_left 1) c_",i,") c_",i,")) (bvxor ((_ rotate_right 3) kB_",i+3,") kB_",i+1,")))))", sep = '')
-	for i in range(NbrE0+NbrEm+NbrE1):
-		if rk_d:
-			print(f"(assert ( = #x0000 kB_{i}))")
-
-
-	for i in range(NbrE0+NbrEm-1):
-		print("(assert (=  keyT_",i,"  kT_",i,"))", sep = '')
-	for i in range(NbrEm+NbrE1-1):
-		print("(assert (=  keyB_",i+NbrE0+1,"  kB_",i+NbrE0+1,"))", sep = '')
 
 	# -----------------------------------------------  TOP TRAIL --------------------------------------------
 
@@ -253,9 +370,9 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 	for i in range(NbrE0):
 		print("(assert (=  rgtT_",i+1,"  lftT_",i," ))", sep = '') # copied branch   rgt i+1 = lft i
 		print("(assert (=  varibitsT_",i,"  (bvor  ((_ rotate_left 8) lftT_",i,") ((_ rotate_left 1)lftT_",i,"))))", sep = '') # varibits computation
-		print("(assert (=  doublebitsT_",i," (bvand (bvand (bvxor ((_ rotate_left 8) lftT_",i,") #xffff) ((_ rotate_left 1)lftT_",i,")) ((_ rotate_left 15) lftT_",i,"))))", sep = '')#  doublebits computation
-		print("(assert (=  #x0000 (bvand  (bvxor varibitsT_",i," #xffff)  dT_",i,")))", sep = '')	# cond 1 thm 3
-		print("(assert (=  #x0000 (bvand  (bvxor ((_ rotate_left 7) dT_",i,") dT_",i,") doublebitsT_",i,")))", sep = '') # cond 2 thm 3
+		print(f"(assert (=  doublebitsT_{i} (bvand (bvand (bvxor ((_ rotate_left 8) lftT_{i}) {minus_one(branch_size)}) ((_ rotate_left 1)lftT_{i})) ((_ rotate_left 15) lftT_{i}))))")#  doublebits computation
+		print(f"(assert (=  {zero(branch_size)} (bvand  (bvxor varibitsT_{i} {minus_one(branch_size)})  dT_{i})))")	# cond 1 thm 3
+		print(f"(assert (=  {zero(branch_size)} (bvand  (bvxor ((_ rotate_left 7) dT_{i}) dT_{i}) doublebitsT_{i})))") # cond 2 thm 3
 		print("(assert (=  lftT_",i+1,"  (bvxor (bvxor rgtT_",i," dT_",i,") (bvxor ((_ rotate_left 2) lftT_",i,") keyT_",i,"))))", sep = '') # compute resulting left diff
 		print("(assert (=  zT_",i," (bvxor varibitsT_",i,"  doublebitsT_",i,")))", sep = '') #	z = varibits + doublebits
 
@@ -268,12 +385,11 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 	for i in range(NbrE0+NbrEm, NbrE0+NbrEm+NbrE1):
 		print("(assert (=  rgtB_",i+1,"  lftB_",i," ))", sep = '') # copied branch   rgt i+1 = lft i
 		print("(assert (=  varibitsB_",i,"  (bvor  ((_ rotate_left 8) lftB_",i,") ((_ rotate_left 1)lftB_",i,"))))", sep = '') # varibits computation
-		print("(assert (=  doublebitsB_",i," (bvand (bvand (bvxor ((_ rotate_left 8) lftB_",i,") #xffff) ((_ rotate_left 1)lftB_",i,")) ((_ rotate_left 15) lftB_",i,"))))", sep = '')#  doublebits computation
-		print("(assert (=  #x0000 (bvand  (bvxor varibitsB_",i," #xffff)  dB_",i,")))", sep = '')	# cond 1 thm 3
-		print("(assert (=  #x0000 (bvand  (bvxor ((_ rotate_left 7) dB_",i,") dB_",i,") doublebitsB_",i,")))", sep = '') # cond 2 thm 3
+		print(f"(assert (=  doublebitsB_{i} (bvand (bvand (bvxor ((_ rotate_left 8) lftB_{i}) {minus_one(branch_size)}) ((_ rotate_left 1)lftB_{i})) ((_ rotate_left 15) lftB_{i}))))")#  doublebits computation
+		print(f"(assert (=  {zero(branch_size)} (bvand  (bvxor varibitsB_{i} {minus_one(branch_size)})  dB_{i})))")	# cond 1 thm 3
+		print(f"(assert (=  {zero(branch_size)} (bvand  (bvxor ((_ rotate_left 7) dB_{i}) dB_{i}) doublebitsB_{i})))") # cond 2 thm 3
 		print("(assert (=  lftB_",i+1,"  (bvxor (bvxor rgtB_",i," dB_",i,") (bvxor ((_ rotate_left 2) lftB_",i,") keyB_",i,"))))", sep = '') # compute resulting left diff
 		print("(assert (=  zB_",i," (bvxor varibitsB_",i,"  doublebitsB_",i,")))", sep = '') #	z = varibits + doublebits
-
 
 
 
@@ -283,68 +399,69 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 	# -----------------------------------------------  MIDDLE PART --------------------------------------------
 
 	for i in range(NbrE0+1):
-		print("(assert (= #b0000000000000000 u_lftT_",i,"  ))", sep = '')			
-		print("(assert (= #b0000000000000000 u_rgtT_",i,"  ))", sep = '')
+		print(f"(assert (= {zero(branch_size)} u_lftT_{i}  ))")			# ok
+		print(f"(assert (= {zero(branch_size)} u_rgtT_{i}  ))")
 
 	for i in range(NbrE0+NbrEm,NbrE0+NbrEm+NbrE1+1):
-		print("(assert (= #b0000000000000000 u_lftB_",i,"  ))", sep = '')			
-		print("(assert (= #b0000000000000000 u_rgtB_",i,"  ))", sep = '')
-
+		print(f"(assert (= {zero(branch_size)} u_lftB_{i}  ))")			# ok
+		print(f"(assert (= {zero(branch_size)} u_rgtB_{i}  ))")
 
 
 
 	# BCT verification
 	for i in range(NbrE0,NbrE0+NbrEm):
-		if not rk_d or not rotational:
-			print("(assert (= #xffff (bvor (bvand (bvor (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") ) (bvnot  ((_ rotate_left 8) lftT_",i,") )) (bvand (bvnot  ((_ rotate_left 1) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 1) rgtB_",i+1,") ) )) (bvor (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 1) lftT_",i,"))) (bvand (bvnot ((_ rotate_left 8) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 8) rgtB_",i+1,") ) )) ) (bvand (bvand (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") )   ((_ rotate_left 8) lftT_",i,")) (bvand (bvnot  ((_ rotate_left 1) u_rgtB_",i+1,") )  ((_ rotate_left 1) rgtB_",i+1,")) ) (bvand (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,") )  ((_ rotate_left 1) lftT_",i,")) (bvand (bvnot ((_ rotate_left 8) u_rgtB_",i+1,") )  ((_ rotate_left 8) rgtB_",i+1,")) ) ) ) ) )", sep = '')
+		if not impossible:
+			if not rx_d:
+				# one line version (no j)
+				print(f"(assert (= {minus_one(branch_size)} (bvor (bvand (bvor (bvand (bvnot ((_ rotate_left 8) u_lftT_{i}) ) (bvnot  ((_ rotate_left 8) lftT_{i}) )) (bvand (bvnot  ((_ rotate_left 1) u_rgtB_{i+1}) )  (bvnot ((_ rotate_left 1) rgtB_{i+1}) ) )) (bvor (bvand (bvnot ((_ rotate_left 1) u_lftT_{i})) (bvnot ((_ rotate_left 1) lftT_{i}))) (bvand (bvnot ((_ rotate_left 8) u_rgtB_{i+1}) )  (bvnot ((_ rotate_left 8) rgtB_{i+1}) ) )) ) (bvand (bvand (bvand (bvnot ((_ rotate_left 8) u_lftT_{i}) )   ((_ rotate_left 8) lftT_{i})) (bvand (bvnot  ((_ rotate_left 1) u_rgtB_{i+1}) )  ((_ rotate_left 1) rgtB_{i+1})) ) (bvand (bvand (bvnot ((_ rotate_left 1) u_lftT_{i}) )  ((_ rotate_left 1) lftT_{i})) (bvand (bvnot ((_ rotate_left 8) u_rgtB_{i+1}) )  ((_ rotate_left 8) rgtB_{i+1})) ) ) ) ) )")
+			else:
+				print(f"(assert (= {minus_one(branch_size)} (bvor (bvand (bvor (bvand (bvnot ((_ rotate_left 8) u_lftT_{i}) ) (bvnot  ((_ rotate_left 8) lftT_{i}) )) (bvand (bvnot  ((_ rotate_left {1+rotation_index}) u_rgtB_{i+1}) )  (bvnot ((_ rotate_left {1+rotation_index}) rgtB_{i+1}) ) )) (bvor (bvand (bvnot ((_ rotate_left 1) u_lftT_{i})) (bvnot ((_ rotate_left 1) lftT_{i}))) (bvand (bvnot ((_ rotate_left {8+rotation_index}) u_rgtB_{i+1}) )  (bvnot ((_ rotate_left {8+rotation_index}) rgtB_{i+1}) ) )) ) (bvand (bvand (bvand (bvnot ((_ rotate_left 8) u_lftT_{i}) )   ((_ rotate_left 8) lftT_{i})) (bvand (bvnot  ((_ rotate_left {1+rotation_index}) u_rgtB_{i+1}) )  ((_ rotate_left {1+rotation_index}) rgtB_{i+1})) ) (bvand (bvand (bvnot ((_ rotate_left 1) u_lftT_{i}) )  ((_ rotate_left 1) lftT_{i})) (bvand (bvnot ((_ rotate_left {8+rotation_index}) u_rgtB_{i+1}) )  ((_ rotate_left {8+rotation_index}) rgtB_{i+1})) ) ) ) ) )")
 		else:
-			print("(assert (= #xffff (bvor (bvand (bvor (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") ) (bvnot  ((_ rotate_left 8) lftT_",i,") )) (bvand (bvnot  ((_ rotate_left 2) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 2) rgtB_",i+1,") ) )) (bvor (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 1) lftT_",i,"))) (bvand (bvnot ((_ rotate_left 9) u_rgtB_",i+1,") )  (bvnot ((_ rotate_left 9) rgtB_",i+1,") ) )) ) (bvand (bvand (bvand (bvnot ((_ rotate_left 8) u_lftT_",i,") )   ((_ rotate_left 8) lftT_",i,")) (bvand (bvnot  ((_ rotate_left 2) u_rgtB_",i+1,") )  ((_ rotate_left 2) rgtB_",i+1,")) ) (bvand (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,") )  ((_ rotate_left 1) lftT_",i,")) (bvand (bvnot ((_ rotate_left 9) u_rgtB_",i+1,") )  ((_ rotate_left 9) rgtB_",i+1,")) ) ) ) ) )", sep = '')
-
+			print(f"(assert (= constraintmask_{i} (bvand (bvxor (bvand {shift(f'lftT_{i}',1)} {shift(f'rgtB_{i+1}',8)}) (bvand {shift(f'lftT_{i}',8)} {shift(f'rgtB_{i+1}',1)})) (bvnot (bvor (bvor (bvxor (bvand (bvor  {shift(f'lftT_{i}',1)}  {shift(f'u_lftT_{i}',1)})  (bvor  {shift(f'rgtB_{i+1}',8)}  {shift(f'u_rgtB_{i+1}',8)})) (bvand  {shift(f'lftT_{i}',1)}  {shift(f'rgtB_{i+1}',8)})) (bvxor (bvand (bvor  {shift(f'lftT_{i}',8)}  {shift(f'u_lftT_{i}',8)})  (bvor  {shift(f'rgtB_{i+1}',1)}  {shift(f'u_rgtB_{i+1}',1)})) (bvand  {shift(f'lftT_{i}',8)}  {shift(f'rgtB_{i+1}',1)}))) (bvor (bvor u_rgtT_{i} u_lftB_{i+1}) (bvand {shift(f'u_lftT_{i}',2)} {shift(f'u_rgtB_{i+1}',2)})) )) )))")
 
 	# propagation in Em, top trail
 	for i in range(NbrE0,NbrE0+NbrEm-1):		# for all the middle rounds
-		print(f"(assert (= #x0000 (bvand lftT_{i} u_lftT_{i})))") # unknown => difference = 0
+		print(f"(assert (= {zero(branch_size)} (bvand lftT_{i+1} u_lftT_{i+1})))") # unknown => difference = 0
 
 		print("(assert (=  rgtT_",i+1,"  lftT_",i," ))", sep = '') 		# copied branch   difference
 		print("(assert (=  u_rgtT_",i+1,"  u_lftT_",i," ))", sep = '') 	# copied branch   unknown status
 
-		print("(assert (=  computableT_",i," (bvand (bvand (bvand (bvnot ((_ rotate_left 2) u_lftT_",i,")) (bvnot u_rgtT_",i,")) (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 8) u_lftT_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftT_",i,")) (bvnot ((_ rotate_left 8) lftT_",i,")) ) )))" , sep = '') # and key always known
+		print("(assert (=  computableT_",i," (bvand (bvand (bvand (bvnot ((_ rotate_left 2) u_lftT_",i,")) (bvnot u_rgtT_",i,")) (bvand (bvnot ((_ rotate_left 1) u_lftT_",i,")) (bvnot ((_ rotate_left 8) u_lftT_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftT_",i,")) (bvnot ((_ rotate_left 8) lftT_",i,")) ) )))" , sep = '') # and key always known  changed
 
-		print(f"(assert (= #xffff (bvor (bvnot PayT_{i}) (bvor {shift(f'lftT_{i}',1)} {shift(f'lftT_{i}',8)}  ))))") # Pay => active
+		print(f"(assert (= {minus_one(branch_size)} (bvor (bvnot PayT_{i}) (bvor {shift(f'lftT_{i}',1)} {shift(f'lftT_{i}',8)}  ))))") # Pay => active
 		print(f"(assert (= doublebitsT_{i} (bvand (bvand PayT_{i} {shift(f'PayT_{i}',7)}) (bvnot {shift(f'lftT_{i}',8)}))))") # Double if 2 pays and an inactive bit
-		print(f"(assert (= #x0000 (bvand (bvand PayT_{i} {shift(f'PayT_{i}',7)}) {shift(f'u_lftT_{i}',8)})))") # Two pays => known bit
+		print(f"(assert (= {zero(branch_size)} (bvand (bvand PayT_{i} {shift(f'PayT_{i}',7)}) {shift(f'u_lftT_{i}',8)})))") # Two pays => known bit
 
-		print("(assert (=  u_lftT_",i+1,"  (bvand (bvnot computableT_",i,") (bvnot  PayT_",i," ))))", sep = '')
+		print("(assert (=  u_lftT_",i+1,"  (bvand (bvnot computableT_",i,") (bvnot  PayT_",i," ))))", sep = '') # ok
 
-		print("(assert (= computedValueT_",i," (bvxor (bvxor ((_ rotate_left 2) lftT_",i,") keyT_",i," ) rgtT_",i,")))", sep = '')	# if computable, this is what is the linear term
+		print("(assert (= computedValueT_",i," (bvxor (bvxor ((_ rotate_left 2) lftT_",i,") keyT_",i," ) rgtT_",i,")))", sep = '')	# if computable, this is what is the linear term changed
 
 		print(f"(assert (= (bvand computableT_{i} lftT_{i+1}) (bvand computableT_{i} computedValueT_{i} )) )") # Computable => result equals computed value
-		print(f"(assert (= #x0000 (bvand doublebitsT_{i} (bvxor (bvxor (bvxor rgtT_{i} {shift(f'lftT_{i}',2)}) (bvxor keyT_{i} lftT_{i+1}) ) (bvxor (bvxor {shift(f'rgtT_{i}',7)} {shift(f'lftT_{i}',9)}) (bvxor {shift(f'keyT_{i}',7)} {shift(f'lftT_{i+1}',7)} ))))))") # Double bits => equal outputs of the ands
+		print(f"(assert (= {zero(branch_size)} (bvand doublebitsT_{i} (bvxor (bvxor (bvxor rgtT_{i} {shift(f'lftT_{i}',2)}) (bvxor keyT_{i} lftT_{i+1}) ) (bvxor (bvxor {shift(f'rgtT_{i}',7)} {shift(f'lftT_{i}',9)}) (bvxor {shift(f'keyT_{i}',7)} {shift(f'lftT_{i+1}',7)} ))))))") # Double bits => equal outputs of the ands
 
 
 
 
 	# propagation in Em, bottom trail
 	for i in range(NbrE0+1,NbrE0+NbrEm):		# for all the middle rounds
-		print(f"(assert (= #x0000 (bvand lftB_{i} u_lftB_{i})))") # unknown => difference = 0
+		print(f"(assert (= {zero(branch_size)} (bvand rgtB_{i} u_rgtB_{i})))") # unknown => difference = 0
 
 
-		print("(assert (=  rgtB_",i+1,"  lftB_",i," ))", sep = '') 		# copied branch   difference           
-		print("(assert (=  u_rgtB_",i+1,"  u_lftB_",i," ))", sep = '') 	# copied branch   unknown status       
+		print("(assert (=  rgtB_",i+1,"  lftB_",i," ))", sep = '') 		# copied branch   difference           v
+		print("(assert (=  u_rgtB_",i+1,"  u_lftB_",i," ))", sep = '') 	# copied branch   unknown status       v
 
-		print("(assert (= computableB_",i," (bvand (bvand (bvand (bvnot u_lftB_",i+1,") (bvnot ((_ rotate_left 2) u_lftB_",i,") )) (bvand (bvnot ((_ rotate_left 1) u_lftB_",i,")) (bvnot ((_ rotate_left 8) u_lftB_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftB_",i,")) (bvnot ((_ rotate_left 8) lftB_",i,")) )))) " , sep = '') 
+		print("(assert (= computableB_",i," (bvand (bvand (bvand (bvnot u_lftB_",i+1,") (bvnot ((_ rotate_left 2) u_lftB_",i,") )) (bvand (bvnot ((_ rotate_left 1) u_lftB_",i,")) (bvnot ((_ rotate_left 8) u_lftB_",i,")))) (bvand (bvnot ((_ rotate_left 1) lftB_",i,")) (bvnot ((_ rotate_left 8) lftB_",i,")) )))) " , sep = '') # changed
 
-		print(f"(assert (= #xffff (bvor (bvnot PayB_{i}) (bvor {shift(f'lftB_{i}',1)} {shift(f'lftB_{i}',8)}  ))))") # Pay => active
+		print(f"(assert (= {minus_one(branch_size)} (bvor (bvnot PayB_{i}) (bvor {shift(f'lftB_{i}',1)} {shift(f'lftB_{i}',8)}  ))))") # Pay => active
 		print(f"(assert (= doublebitsB_{i} (bvand (bvand PayB_{i} {shift(f'PayB_{i}',7)}) (bvnot {shift(f'lftB_{i}',8)}))))") # Double if 2 pays and an inactive bit
-		print(f"(assert (= #x0000 (bvand (bvand PayB_{i} {shift(f'PayB_{i}',7)}) {shift(f'u_lftB_{i}',8)})))") # Two pays => known bit
+		print(f"(assert (= {zero(branch_size)} (bvand (bvand PayB_{i} {shift(f'PayB_{i}',7)}) {shift(f'u_lftB_{i}',8)})))") # Two pays => known bit
 
 		print("(assert (=  u_rgtB_",i,"  (bvand (bvnot computableB_",i,") (bvnot PayB_",i," ))))", sep = '')
 
 		print("(assert (= computedValueB_",i," (bvxor (bvxor lftB_",i+1," keyB_",i," ) ((_ rotate_left 2) lftB_",i,") )))", sep = '')
 
 		print(f"(assert (= (bvand computableB_{i} rgtB_{i}) (bvand computableB_{i} computedValueB_{i} )) )") # Computable => result equals computed value
-		print(f"(assert (= #x0000 (bvand doublebitsB_{i} (bvxor (bvxor (bvxor rgtB_{i} {shift(f'lftB_{i}',2)}) (bvxor keyB_{i} lftB_{i+1}) ) (bvxor (bvxor {shift(f'rgtB_{i}',7)} {shift(f'lftB_{i}',9)}) (bvxor {shift(f'keyB_{i}',7)} {shift(f'lftB_{i+1}',7)} ) )))))") # Double bits => equal outputs of the ands
-
+		print(f"(assert (= {zero(branch_size)} (bvand doublebitsB_{i} (bvxor (bvxor (bvxor rgtB_{i} {shift(f'lftB_{i}',2)}) (bvxor keyB_{i} lftB_{i+1}) ) (bvxor (bvxor {shift(f'rgtB_{i}',7)} {shift(f'lftB_{i}',9)}) (bvxor {shift(f'keyB_{i}',7)} {shift(f'lftB_{i+1}',7)} ) )))))") # Double bits => equal outputs of the ands
 
 
 	# -----------------------------------------------  OBJECTIVE  --------------------------------------------
@@ -363,7 +480,7 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 
 
 
-	# sum all wrT_ to get final proba, has to be equal to the objective
+	# sum all wrT_ to get final proba, has to be equal to bound_plain, which is a parameter
 
 	print("(assert (=  #b",OBJ," ", sep = '',end='')
 	for i in range(NbrE0):
@@ -446,14 +563,12 @@ def print_query(startingIndex, NbrE0, NbrEm, NbrE1, obj,check_instanciable=False
 	print("(get-value ( lftB_",NbrE0+NbrEm+NbrE1,"))", sep = '')
 	print("(get-value ( rgtB_",NbrE0+NbrEm+NbrE1,"))", sep = '')
 
-
-
-
-
+	if impossible :
+		for i in range(NbrE0,NbrE0+NbrEm):
+			print(f"(get-value ( constraintmask_{i} ))")
 
 	print("(exit)")
 
-		
 
 if __name__ == '__main__':
 	main()
